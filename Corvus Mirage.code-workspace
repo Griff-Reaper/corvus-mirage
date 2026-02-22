@@ -1,0 +1,64 @@
+{
+  "folders": [
+    {
+      "name": "Corvus Mirage (Root)",
+      "path": "."
+    },
+    {
+      "name": "ARIA",
+      "path": "aria"
+    },
+    {
+      "name": "Gateway",
+      "path": "gateway"
+    },
+    {
+      "name": "Red Team Simulator",
+      "path": "red-team"
+    },
+    {
+      "name": "Dashboard",
+      "path": "dashboard"
+    },
+    {
+      "name": "Shared",
+      "path": "shared"
+    },
+    {
+      "name": "Docs",
+      "path": "docs"
+    }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "[python]": {
+      "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+    "python.analysis.typeCheckingMode": "basic",
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/node_modules": true,
+      "**/.next": true
+    },
+    "editor.rulers": [88],
+    "terminal.integrated.env.osx": {
+      "PYTHONPATH": "${workspaceFolder:Corvus Mirage (Root)}"
+    },
+    "terminal.integrated.env.linux": {
+      "PYTHONPATH": "${workspaceFolder:Corvus Mirage (Root)}"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-python.black-formatter",
+      "esbenp.prettier-vscode",
+      "bradlc.vscode-tailwindcss",
+      "ms-azuretools.vscode-docker",
+      "eamodio.gitlens",
+      "yzhang.markdown-all-in-one"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+# Corvus Mirage — ARIA Dependencies
+
+# API Framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Twilio (Voice layer)
+twilio==9.3.3
+
+# Deepgram (Real-time STT)
+deepgram-sdk==3.7.0
+
+# Anthropic (Detection engine)
+anthropic==0.34.0
+
+# WebSockets (Real-time dashboard streaming)
+websockets==13.1
+
+# HTTP client
+httpx==0.27.2
+
+# Environment
+python-dotenv==1.0.1
+
+# Utilities
+pydantic>=2.2.0,<3.0.0
+python-multipart==0.0.12
+aiofiles==24.1.0

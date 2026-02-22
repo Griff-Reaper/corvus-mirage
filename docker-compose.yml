@@ -1,0 +1,107 @@
+version: '3.8'
+
+# ─────────────────────────────────────────
+# CORVUS MIRAGE — Docker Compose
+# Runs all platform components together
+# Usage: docker-compose up --build
+# ─────────────────────────────────────────
+
+services:
+
+  aria:
+    build: ./aria
+    container_name: corvus-aria
+    ports:
+      - "${ARIA_PORT:-8000}:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ARIA_SECRET_KEY=${ARIA_SECRET_KEY}
+      - THREAT_INTEL_DB_PATH=/app/shared/data/threat_intel.db
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    volumes:
+      - ./shared:/app/shared
+      - aria_logs:/app/logs
+    depends_on:
+      - threat-intel
+    restart: unless-stopped
+    networks:
+      - corvus-net
+
+  gateway:
+    build: ./gateway
+    container_name: corvus-gateway
+    ports:
+      - "${GATEWAY_PORT:-8001}:8001"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
+      - GATEWAY_SECRET_KEY=${GATEWAY_SECRET_KEY}
+      - THREAT_INTEL_DB_PATH=/app/shared/data/threat_intel.db
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    volumes:
+      - ./shared:/app/shared
+      - gateway_logs:/app/logs
+    depends_on:
+      - threat-intel
+    restart: unless-stopped
+    networks:
+      - corvus-net
+
+  red-team:
+    build: ./red-team
+    container_name: corvus-red-team
+    ports:
+      - "${RED_TEAM_PORT:-8002}:8002"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL}
+      - RED_TEAM_TARGET_ARIA=http://aria:8000
+      - RED_TEAM_TARGET_GATEWAY=http://gateway:8001
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    volumes:
+      - ./shared:/app/shared
+      - redteam_logs:/app/logs
+    depends_on:
+      - aria
+      - gateway
+    networks:
+      - corvus-net
+
+  dashboard:
+    build: ./dashboard
+    container_name: corvus-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_ARIA_API=http://localhost:8000
+      - NEXT_PUBLIC_GATEWAY_API=http://localhost:8001
+      - NEXT_PUBLIC_RED_TEAM_API=http://localhost:8002
+    depends_on:
+      - aria
+      - gateway
+      - red-team
+    networks:
+      - corvus-net
+
+  threat-intel:
+    image: python:3.11-slim
+    container_name: corvus-threat-intel
+    command: python /app/shared/threat_intel_init.py
+    volumes:
+      - ./shared:/app/shared
+    networks:
+      - corvus-net
+
+networks:
+  corvus-net:
+    driver: bridge
+
+volumes:
+  aria_logs:
+  gateway_logs:
+  redteam_logs:
