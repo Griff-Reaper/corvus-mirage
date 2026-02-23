@@ -137,6 +137,43 @@ async def voice_stream(websocket: WebSocket, session_id: str):
             active_sessions[session_id]["end_time"] = datetime.utcnow().isoformat()
             await ws_manager.emit_session_update(active_sessions[session_id])
 
+async def _write_aria_event_to_intel(result, session_id, transcript, caller_id=None):
+    if not result.get("is_attack"):
+        return
+    try:
+        from shared.threat_intel import write_event
+        from shared.models import ThreatEvent, ThreatSource
+
+        score = float(result.get("threat_score", 0))
+        if score >= 75:   level = "critical"
+        elif score >= 55: level = "high"
+        elif score >= 35: level = "medium"
+        elif score >= 15: level = "low"
+        else:             level = "safe"
+
+        event = ThreatEvent(
+            session_id=session_id,
+            source=ThreatSource.ARIA,
+            caller_id=caller_id,
+            threat_score=score,
+            threat_level=level,
+            is_malicious=True,
+            confidence=float(result.get("confidence", 0.0)),
+            techniques=result.get("techniques", []),
+            mitre_tags=result.get("mitre_tags", []),
+            action_taken=result.get("recommended_action", "monitor").lower(),
+            sophistication=result.get("sophistication"),
+            raw_content=transcript,
+            primary_objective=result.get("primary_objective"),
+            evidence=result.get("evidence", []),
+        )
+        write_event(event)
+
+        from shared.event_bus import get_event_bus
+        await get_event_bus().publish_threat("aria", event.to_dict())
+
+    except Exception as e:
+        logger.warning(f"Shared intel write failed (non-critical): {e}")
 
 async def _run_detection(session_id: str, transcript: str, ws_manager):
     try:
@@ -145,6 +182,9 @@ async def _run_detection(session_id: str, transcript: str, ws_manager):
             return
 
         session = active_sessions[session_id]
+        
+        await _write_aria_event_to_intel(result, session_id, transcript, session.get("caller"))
+        
         session["threat_score"] = max(session.get("threat_score", 0), result.get("threat_score", 0))
 
         for t in result.get("techniques", []):

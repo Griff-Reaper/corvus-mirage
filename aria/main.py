@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -42,10 +42,33 @@ app.include_router(health_router)
 app.include_router(voice_router, prefix="/voice")
 app.include_router(sessions_router, prefix="/sessions")
 
+@app.get("/soc/stats")
+async def soc_stats():
+    from routes.sessions import active_sessions
+    sessions = list(active_sessions.values())
+    critical = sum(1 for s in sessions if s.get("threat_level") == "CRITICAL")
+    high = sum(1 for s in sessions if s.get("threat_level") == "HIGH")
+    return {
+        "total_sessions": len(sessions),
+        "critical": critical,
+        "high_threat": high,
+        "total_messages": sum(s.get("message_count", 0) for s in sessions),
+        "honeytokens_deployed": sum(len(s.get("honeytokens", [])) for s in sessions),
+        "correlated_groups": 0
+    }
+    
+@app.websocket("/soc/ws")
+async def soc_websocket(websocket: WebSocket):
+    await app.state.ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        app.state.ws_manager.disconnect(websocket)    
 
 @app.on_event("startup")
 async def startup():
-    from shared.threat_intel_init import init_db
+    from shared.threat_intel import init_db
     init_db()
     print("🦅 Corvus Mirage — ARIA online")
 

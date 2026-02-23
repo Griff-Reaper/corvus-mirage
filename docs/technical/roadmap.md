@@ -1,165 +1,171 @@
-# Corvus Mirage — Foundation Roadmap
-
-> *"The raven watches everything. The mirage is what the attacker sees."*
-
-**Version:** 0.1 — Foundation  
-**Started:** February 21, 2026  
-**Status:** In Development
+# Corvus Mirage — Technical Roadmap
 
 ---
 
-## Vision
+## Platform Overview
 
-Corvus Mirage is an AI security platform that protects both AI systems and the humans who operate them. While existing tools like Shannon target web application vulnerabilities, Corvus Mirage addresses two underprotected attack surfaces: AI systems themselves (prompt injection, adversarial inputs, model exploitation) and the human layer (social engineering, vishing, pretexting).
-
-The result is a complete offensive-defensive loop — three components that validate, protect, and detect across every major AI-era threat vector.
-
----
-
-## Platform Architecture
+Corvus Mirage is a three-component AI security platform designed to detect, deceive, and validate threats across voice and prompt attack vectors.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  CORVUS MIRAGE                       │
-│                                                      │
-│  ┌──────────┐   ┌──────────┐   ┌──────────────────┐ │
-│  │  ARIA    │   │ GATEWAY  │   │  RED TEAM SIM    │ │
-│  │ Honeypot │   │   AI     │   │   Validation     │ │
-│  │ + Vishing│   │Protection│   │     Engine       │ │
-│  └────┬─────┘   └────┬─────┘   └────────┬─────────┘ │
-│       │              │                  │            │
-│  ─────┴──────────────┴──────────────────┴──────────  │
-│              Shared Threat Intelligence              │
-│              Unified Dashboard & Alerting            │
-└─────────────────────────────────────────────────────┘
+ARIA              ← Dual-mode honeypot + real-time vishing detection
+Gateway           ← Model-agnostic AI prompt protection layer
+Red Team Simulator ← Adversarial validation engine
+Dashboard         ← Unified SOC command center
+Shared            ← Threat intelligence DB + event bus
 ```
 
-All three components operate independently but feed into a shared threat intelligence layer and unified dashboard. Patterns learned in one component inform the others.
+**Target:** Enterprise security companies (CrowdStrike, Anthropic)
+**Positioning:** End-to-end AI attack surface coverage — the only platform that detects coordinated attackers operating across both voice and prompt vectors simultaneously.
 
 ---
 
-## Component 1: ARIA
+## 7-Day Build Plan
 
-**Role:** Deception and detection engine — two operating modes.
+### ✅ Day 1 — ARIA Core
+Single-session voice pipeline. Twilio webhook → Deepgram real-time STT → Claude detection engine → threat assessment. Live phone call validated end to end.
 
-**Mode 1 — Web Honeypot:**
-Presents as a legitimate AI-powered interface. Lures attackers, fingerprints their techniques, maps attack patterns, deploys honeytokens, and logs everything with full attacker profiling and MITRE ATT&CK tagging.
-
-**Mode 2 — Vishing Detection & Response:**
-Answers inbound calls via Twilio. Real-time speech-to-text via Deepgram feeds ARIA's detection engine. Social engineering techniques are identified mid-call. Live transcript and threat profile surface to the dashboard instantly. IT team is alerted in real time and can intervene while the call is active.
-
-**Foundation Build Items:**
-- [ ] Fork existing ARIA codebase into monorepo, apply Corvus Mirage branding
-- [ ] Twilio Voice integration — inbound call handling
-- [ ] Deepgram real-time STT — streaming transcript into detection engine
-- [ ] Voice session handling alongside existing text sessions in dashboard
-- [ ] Real-time transcript panel in dashboard UI
-- [ ] Geolocation and caller metadata storage (from Twilio)
-- [ ] Call tracing and origin intelligence visualization
-- [ ] Attacker profiling extended to voice-specific techniques:
-  - Pretexting
-  - Urgency and authority impersonation
-  - Credential harvesting via voice
-  - Verification bypass attempts
-- [ ] Cross-session correlation — same attacker across voice and web vectors
-- [ ] Alert pipeline — Slack, email, webhook
-
-**Definition of Done:** A phone number answers via ARIA, detects social engineering in real time, surfaces live transcript + attacker profile to dashboard, fires alerts to IT team.
+**Delivered:**
+- FastAPI infrastructure with Twilio webhook handling
+- Deepgram real-time speech-to-text integration
+- Claude-powered social engineering detection
+- WebSocket manager for real-time dashboard streaming
+- Session management and threat scoring
+- ARIA SOC frontend (React/Vite) on port 5174
+- Domain secured: corvusmirage.ai (Cloudflare)
 
 ---
 
-## Component 2: Gateway
+### ✅ Day 2 — Gateway + Shared Intelligence + Unified Dashboard
 
-**Role:** Model-agnostic AI protection layer. Sits in front of any AI deployment and inspects all traffic in and out.
+#### Part 1: Gateway
+Merged Prompt-Shield and Prompt-Firewall into a single clean AI protection layer. Three-layer ensemble detection engine with configurable policy management.
 
-**What it detects:**
-- Prompt injection attacks
-- Jailbreak attempts
-- Adversarial inputs
-- Data exfiltration through model context
-- Model extraction probing
-- Anomalous usage patterns
+**Delivered:**
+- Three-layer detection: rule-based (40%) + statistical (25%) + semantic (35%)
+- Hard override on strong rule matches — single injection pattern forces minimum 80% of rule score
+- Sanitizer with PII redaction and malicious pattern removal
+- Runtime policy management via admin API
+- WebSocket manager mirroring ARIA's for unified dashboard compatibility
+- Detection tuning: first hit scores 70, threshold lowered to 40
+- Processing time: ~5ms per inspection
 
-**Foundation Build Items:**
-- [ ] Merge Prompt-Shield and Prompt-Firewall into single clean codebase
-- [ ] Proper REST API with full documentation
-- [ ] Model-agnostic design — works with Claude, GPT, Gemini, open source
-- [ ] Configurable ruleset — organizations define thresholds and policies
-- [ ] Admin panel for rule management
-- [ ] Rate limiting and anomaly detection on usage patterns
-- [ ] Detection logging pipeline feeding into Corvus Mirage dashboard
-- [ ] Alerting integration
+#### Part 2: Shared Threat Intelligence Layer
+Wired ARIA and Gateway into a single SQLite database with cross-vector correlation.
 
-**Definition of Done:** Any AI deployment routes through Gateway via API, receives real-time protection, and surfaces incidents to unified dashboard.
+**Delivered:**
+- Unified `ThreatEvent` schema accommodating both voice and prompt threat types
+- `threat_events` table — every individual detection from both components
+- `attacker_profiles` table — cross-vector actor records
+- `get_cross_vector_sessions()` — finds actors appearing in both ARIA and Gateway events
+- Shared async event bus for real-time cross-component awareness
+- Both components writing to shared DB on every malicious detection
 
----
+#### Part 3: Unified SOC Dashboard
+Single operator interface showing ARIA voice threats and Gateway prompt injections in real time.
 
-## Component 3: Red Team Simulator
+**Delivered:**
+- Unified dashboard on port 5175 (extended from ARIA's production-quality frontend)
+- Dual WebSocket connections — ARIA (8001) and Dashboard FastAPI (8080)
+- DB polling architecture for cross-process Gateway event delivery (2s latency)
+- ALL / ARIA / GATEWAY feed filters
+- Six-counter unified stats bar
+- Cross-vector actor flagging in session list
+- Gateway prompt attempts visible in session detail panel
+- Both ARIA and GATEWAY connection indicators live simultaneously
 
-**Role:** Continuously attacks ARIA and Gateway to validate they work, then reports findings with reproducible proof.
-
-**Foundation Build Items:**
-- [ ] Multi-turn attack chains with escalation — not single prompts
-- [ ] Attack categories mapped to ARIA and Gateway defense coverage
-- [ ] Voice attack simulation feeding into ARIA's vishing detection
-- [ ] Scheduled autonomous attack runs
-- [ ] Pentester-grade findings report with:
-  - Reproduction steps
-  - Severity scoring
-  - Detected vs. missed breakdown
-- [ ] Benchmark scoring system — track improvement over time (citable like XBOW)
-
-**Definition of Done:** One command launches a full attack campaign against ARIA and Gateway, produces a structured findings report, feeds detection gaps back into the system.
-
----
-
-## Unified Layer
-
-**Shared across all components:**
-- Single dashboard — all incidents, blocks, and findings in one place
-- Shared threat intelligence database
-- Unified alerting — Slack, email, webhook, configurable
-- Single installation — deploy all three or individually
-- Consistent logging format across components
+**Port map:**
+```
+8001  ARIA backend
+8002  Gateway backend
+8080  Dashboard FastAPI
+5174  ARIA frontend (component-level)
+5175  Corvus Mirage unified dashboard
+```
 
 ---
 
-## Build Order
+### 🔲 Day 3 — Red Team Simulator (Core)
+The third Corvus Mirage component. Generates adversarial attacks against both ARIA and Gateway — prompt injections, jailbreaks, vishing scripts. Validates detection coverage and produces a scored report.
 
-| Phase | Focus | Components |
-|-------|-------|------------|
-| 1 | Platform setup | Monorepo, branding, shared config, dashboard shell |
-| 2 | ARIA voice layer | Twilio, Deepgram, transcript panel, geolocation |
-| 3 | Gateway consolidation | Merge Prompt-Shield + Prompt-Firewall, REST API |
-| 4 | Red Team enhancement | Voice attacks, scheduled runs, benchmark scoring |
-| 5 | Unified intelligence | Wire components together, shared threat DB |
-| 6 | Docs + Demo environment | Pitch-ready, installable, documented |
+**Goal:** Be able to say "we tested it and it catches X% of known attacks."
 
----
-
-## Infrastructure Status
-
-| Item | Status | Notes |
-|------|--------|-------|
-| `corvusmirage.ai` domain | ✅ Secured | Cloudflare Registrar, expires Feb 21 2028 |
-| Cloudflare security | ✅ Active | Bot Fight Mode on, DNSSEC enabled |
-| Twilio account | ✅ Created | Trial, phone number assigned |
-| Deepgram account | ✅ Created | GitHub SSO |
-| Anthropic API | ✅ Ready | Existing key |
-| SSL/TLS configuration | ⏳ Deferred | Configure at deployment time |
-| VPS/hosting | ⏳ Deferred | DigitalOcean or AWS, configure at deployment |
+**Planned:**
+- Attack library: prompt injection variants, jailbreak attempts, vishing scripts
+- Attack runner targeting both ARIA and Gateway endpoints
+- Detection coverage scoring per attack category
+- Known evasion testing (single-word bypass, encoding tricks, role manipulation)
+- Scored validation report
 
 ---
 
-## Success Criteria (Pitch Ready)
+### 🔲 Day 4 — Red Team Simulator (Integration) + Platform Hardening
+Wire simulator output into the shared DB so attack runs appear in the dashboard. Fix known gaps identified during Day 3 runs.
 
-- [ ] All three components deploy from a single repo with clear setup instructions
-- [ ] ARIA answers a live phone call and detects a social engineering attempt in real time
-- [ ] Gateway blocks prompt injection across at least two different AI models
-- [ ] Red Team Simulator produces a benchmark score that can be cited
-- [ ] Dashboard tells a complete story — no gaps, no rough edges
-- [ ] Documentation is thorough enough for a technical reviewer to understand and evaluate without a demo
+**Planned:**
+- Simulator attack runs visible in unified dashboard feed
+- IP correlation in Gateway (currently missing)
+- Alert webhook URL configured
+- Detection gap fix: single-word evasion bypasses rule-based layer
+- ARIA voice events piped into unified feed (currently connected but not rendering)
+- Tighten any loose ends across all three components
 
 ---
 
-*Roadmap is a living document. Updated as the build evolves.*
+### 🔲 Day 5 — Pitch Documentation + Demo Prep
+Everything needed to actually show this to CrowdStrike or Anthropic.
+
+**Planned:**
+- README overhaul — platform summary, architecture, quickstart
+- Architecture diagram (voice + prompt attack surface, component interaction)
+- One-page platform summary for non-technical stakeholders
+- Recorded demo flow
+- LinkedIn posts for each major component milestone
+
+---
+
+## Known Issues / Technical Debt
+
+| Issue | Component | Priority | Notes |
+|-------|-----------|----------|-------|
+| Single-word evasion | Gateway | High | "Ignore previous instructions" without "all" scores 27.3, below threshold |
+| ARIA events not in unified feed | Dashboard | High | WS connected, frontend not piping ARIA message events into shared feed |
+| Alert webhook not configured | ARIA | Low | Blank URL in .env, non-critical |
+| No IP correlation | Gateway | Medium | Would enable cross-vector correlation by IP, not just session ID |
+| In-memory event bus | Shared | Low | Cross-process publishing doesn't work — DB polling is the current workaround |
+
+---
+
+## Architecture
+
+```
+                    ┌─────────────────────────────────┐
+                    │     Corvus Mirage Dashboard      │
+                    │         localhost:5175            │
+                    │   React/Vite — SOC Command Center │
+                    └──────────┬──────────┬────────────┘
+                               │          │
+                    ┌──────────▼──┐  ┌────▼──────────┐
+                    │    ARIA     │  │  Dashboard API  │
+                    │  :8001      │  │     :8080       │
+                    │  Voice +    │  │  Shared event   │
+                    │  Honeypot   │  │  bus + stats    │
+                    └──────┬──────┘  └────────┬────────┘
+                           │                  │
+                    ┌──────▼──────┐           │
+                    │   Gateway   │           │
+                    │   :8002     │           │
+                    │  Prompt     │           │
+                    │  Inspection │           │
+                    └──────┬──────┘           │
+                           │                  │
+                    ┌──────▼──────────────────▼────────┐
+                    │         Shared Layer              │
+                    │  threat_intel.db (SQLite)         │
+                    │  threat_events + attacker_profiles│
+                    │  event_bus (in-memory, per-process)│
+                    └───────────────────────────────────┘
+```
+
+---
+
+*Last updated: February 22, 2026 — Day 2 complete.*

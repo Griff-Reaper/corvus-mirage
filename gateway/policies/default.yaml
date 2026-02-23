@@ -1,0 +1,68 @@
+# Corvus Mirage — Gateway
+# Default Policy Configuration
+#
+# Policies are evaluated in order. First match wins.
+# Customize thresholds, actions, and conditions for your environment.
+#
+# Actions:  block | sanitize | log | allow
+# Severity: critical | high | medium | low | safe
+# Threshold: 0.0 – 1.0 (fraction of 0-100 threat score)
+
+policies:
+
+  # ── Critical threats: block immediately ──────────────────────────────────
+  - name: block_critical
+    enabled: true
+    action: block
+    severity: critical
+    threshold: 0.75
+    description: "Block critical threats immediately"
+
+  # ── High-confidence injection: block ─────────────────────────────────────
+  - name: block_high_injection
+    enabled: true
+    action: block
+    severity: high
+    threshold: 0.65
+    description: "Block high-confidence prompt injection and jailbreak attempts"
+    conditions:
+      categories:
+        - instruction_override
+        - jailbreak
+        - code_injection
+        - data_exfiltration
+
+  # ── High severity without specific category: sanitize ────────────────────
+  - name: sanitize_high
+    enabled: true
+    action: sanitize
+    severity: high
+    threshold: 0.60
+    description: "Sanitize high-severity prompts that don't hit block categories"
+
+  # ── Model extraction probing: log and flag ────────────────────────────────
+  - name: log_model_extraction
+    enabled: true
+    action: log
+    severity: medium
+    threshold: 0.30
+    description: "Log model extraction probing attempts for review"
+    conditions:
+      categories:
+        - model_extraction
+
+  # ── Medium threats: log ───────────────────────────────────────────────────
+  - name: log_medium
+    enabled: true
+    action: log
+    severity: medium
+    threshold: 0.35
+    description: "Log medium-severity threats for analyst review"
+
+  # ── Clean prompts: allow ─────────────────────────────────────────────────
+  - name: allow_safe
+    enabled: true
+    action: allow
+    severity: safe
+    threshold: 0.0
+    description: "Allow clean prompts"
