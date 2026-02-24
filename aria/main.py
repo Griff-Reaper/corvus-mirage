@@ -19,6 +19,7 @@ from routes.voice import router as voice_router
 from routes.sessions import router as sessions_router
 from routes.health import router as health_router
 from core.websocket_manager import WebSocketManager
+from routes.redteam import router as redteam_router
 
 app = FastAPI(
     title="Corvus Mirage — ARIA",
@@ -41,6 +42,7 @@ app.state.ws_manager = WebSocketManager()
 app.include_router(health_router)
 app.include_router(voice_router, prefix="/voice")
 app.include_router(sessions_router, prefix="/sessions")
+app.include_router(redteam_router)
 
 @app.get("/soc/stats")
 async def soc_stats():
