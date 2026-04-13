@@ -1,5 +1,5 @@
 """
-Gateway routes/inspect.py — with shared threat intel integration
+Gateway routes/inspect.py — with shared threat intel + IP correlation
 
 Replace your existing gateway/routes/inspect.py with this file.
 """
@@ -9,7 +9,6 @@ import logging
 import sys
 from pathlib import Path
 
-# Add monorepo root to path so shared/ is importable
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
@@ -23,6 +22,24 @@ logger = logging.getLogger("gateway.routes.inspect")
 router = APIRouter(prefix="/inspect", tags=["inspect"])
 
 
+def _extract_ip(request: Request) -> str | None:
+    """
+    Extract the real client IP from the request.
+    Checks X-Forwarded-For first (reverse proxy / load balancer),
+    then falls back to the direct connection address.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # X-Forwarded-For can be a comma-separated list — leftmost is the originating client
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
 @router.post("")
 async def inspect_prompt(request: Request):
     body       = await request.json()
@@ -30,6 +47,7 @@ async def inspect_prompt(request: Request):
     model      = body.get("model", None)
     user_id    = body.get("user_id", None)
     session_id = body.get("session_id", None) or str(uuid.uuid4())
+    ip_address = _extract_ip(request)
 
     start      = time.time()
     request_id = str(uuid.uuid4())
@@ -64,6 +82,7 @@ async def inspect_prompt(request: Request):
         "model":              model,
         "user_id":            user_id,
         "session_id":         session_id,
+        "ip_address":         ip_address,
         "processing_time_ms": processing_ms,
     }
 
@@ -77,6 +96,7 @@ async def inspect_prompt(request: Request):
                 session_id=session_id,
                 source=ThreatSource.GATEWAY,
                 user_id=user_id,
+                ip_address=ip_address,          # now populated
                 threat_score=detection.threat_score,
                 threat_level=detection.threat_level.value,
                 is_malicious=detection.is_malicious,
@@ -93,9 +113,10 @@ async def inspect_prompt(request: Request):
                 }
             )
             write_event(event)
-            logger.info(f"[INTEL] Gateway event written | session={session_id}")
+            logger.info(
+                f"[INTEL] Gateway event written | session={session_id} | ip={ip_address}"
+            )
 
-            # Publish to shared event bus
             from shared.event_bus import get_event_bus
             await get_event_bus().publish_threat("gateway", response)
 
@@ -108,10 +129,20 @@ async def inspect_prompt(request: Request):
     else:
         await ws_manager.broadcast_inspection(response)
 
+    # Fire alert for HIGH and CRITICAL threats only
+    if detection.threat_level.value in ("high", "critical"):
+        try:
+            from shared.alerting import fire_alert, build_gateway_alert
+            alert = build_gateway_alert(response)
+            await fire_alert(alert)
+        except Exception as e:
+            logger.error(f"Alert error: {e}")
+
     logger.info(
         f"[{policy_match.action.value.upper()}] "
         f"score={detection.threat_score} | "
         f"level={detection.threat_level.value} | "
+        f"ip={ip_address} | "
         f"{processing_ms}ms"
     )
 

@@ -33,7 +33,7 @@ from core.attack_library import (
     summary as library_summary,
 )
 from core.attack_runner import AttackRunner
-from core.scorer import score_results, generate_json_report, generate_text_report, print_live_summary
+from core.scorer import score_results, generate_json_report, generate_text_report, print_live_summary, save_to_db
 from config import config
 
 
@@ -85,7 +85,6 @@ def filter_attacks(args):
     attacks = ALL_ATTACKS
 
     if args.category:
-        # Case-insensitive match
         target = args.category.lower()
         attacks = [
             a for a in attacks
@@ -126,7 +125,6 @@ async def main():
 
     attacks = filter_attacks(args)
 
-    # Library summary
     lib = library_summary()
     print(f"  Attack Library: {lib['total']} attacks across {len(lib['by_category'])} categories")
     print(f"  Running:        {len(attacks)} attacks")
@@ -134,7 +132,6 @@ async def main():
     print(f"  ARIA:           {config.aria_api}")
     print()
 
-    # Dry run — just list attacks
     if args.dry_run:
         print("DRY RUN — these attacks would be fired:\n")
         for a in attacks:
@@ -142,7 +139,6 @@ async def main():
         print(f"\nTotal: {len(attacks)} attacks")
         return
 
-    # Run simulation
     runner = AttackRunner(verbose=not args.quiet)
     results = await runner.run(attacks)
 
@@ -150,21 +146,24 @@ async def main():
         print("No results — check that your services are running.")
         sys.exit(1)
 
-    # Score
     score_data = score_results(results)
 
-    # Print live summary table
     print_live_summary(score_data)
 
-    # Save reports
     if not args.no_save:
         json_path = generate_json_report(score_data)
         txt_path, _ = generate_text_report(score_data)
         print(f"  📄 JSON report: {json_path}")
         print(f"  📋 Text report: {txt_path}")
+
+        run_id = save_to_db(
+            score_data, results, config.threat_intel_db_path,
+            report_json_path=json_path,
+            report_txt_path=txt_path,
+        )
+        print(f"  💾 Run saved to DB | {run_id}")
         print()
 
-    # Exit code — 0 if passing, 1 if not (useful for CI)
     if not score_data["summary"]["pitch_ready"]:
         sys.exit(1)
 

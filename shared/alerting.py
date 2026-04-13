@@ -49,14 +49,15 @@ class Alert:
         }
 
     def to_slack_payload(self) -> dict:
+        # Keys match the string values from Severity class
         severity_colors = {
-            Severity.LOW: "#36a64f",
-            Severity.MEDIUM: "#ff9900",
-            Severity.HIGH: "#ff4444",
+            Severity.LOW:      "#36a64f",
+            Severity.MEDIUM:   "#ff9900",
+            Severity.HIGH:     "#ff4444",
             Severity.CRITICAL: "#8b0000",
         }
 
-        color = severity_colors.get(self.severity, "#cccccc")
+        color = severity_colors.get(self.severity.upper(), "#cccccc")
         techniques_str = ", ".join(self.techniques) if self.techniques else "Unknown"
         mitre_str = ", ".join(self.mitre_tags) if self.mitre_tags else "N/A"
 
@@ -67,12 +68,12 @@ class Alert:
                     "title": f"🦅 Corvus Mirage — {self.title}",
                     "text": self.description,
                     "fields": [
-                        {"title": "Severity", "value": self.severity, "short": True},
-                        {"title": "Component", "value": self.component.upper(), "short": True},
-                        {"title": "Techniques", "value": techniques_str, "short": False},
-                        {"title": "MITRE Tags", "value": mitre_str, "short": False},
-                        {"title": "Session ID", "value": self.session_id or "N/A", "short": True},
-                        {"title": "Time", "value": self.timestamp, "short": True},
+                        {"title": "Severity",   "value": self.severity,              "short": True},
+                        {"title": "Component",  "value": self.component.upper(),     "short": True},
+                        {"title": "Techniques", "value": techniques_str,             "short": False},
+                        {"title": "MITRE Tags", "value": mitre_str,                  "short": False},
+                        {"title": "Session ID", "value": self.session_id or "N/A",  "short": True},
+                        {"title": "Time",       "value": self.timestamp,             "short": True},
                     ],
                     "footer": "Corvus Mirage Security Platform",
                 }
@@ -84,15 +85,15 @@ async def fire_alert(alert: Alert) -> bool:
     """Fire an alert through all configured channels."""
     success = True
 
-    # Log regardless
+    # Log regardless of webhook config
     log_fn = {
-        Severity.LOW: logger.info,
-        Severity.MEDIUM: logger.warning,
-        Severity.HIGH: logger.error,
+        Severity.LOW:      logger.info,
+        Severity.MEDIUM:   logger.warning,
+        Severity.HIGH:     logger.error,
         Severity.CRITICAL: logger.critical,
-    }.get(alert.severity, logger.warning)
+    }.get(alert.severity.upper(), logger.warning)
 
-    log_fn(f"[{alert.component.upper()}] {alert.title} — {alert.description}")
+    log_fn(f"[ALERT][{alert.component.upper()}][{alert.severity}] {alert.title} — {alert.description}")
 
     # Webhook (Slack or custom)
     if config.alert_webhook_url:
@@ -104,8 +105,44 @@ async def fire_alert(alert: Alert) -> bool:
                     timeout=5.0,
                 )
                 response.raise_for_status()
+                logger.info(f"Alert delivered to webhook | status={response.status_code}")
         except Exception as e:
             logger.error(f"Failed to send alert to webhook: {e}")
             success = False
+    else:
+        logger.debug("No ALERT_WEBHOOK_URL configured — alert logged only")
 
     return success
+
+
+def build_gateway_alert(response: dict) -> Alert:
+    """
+    Build a standard Alert from a Gateway inspection response dict.
+    Call this for HIGH and CRITICAL detections.
+    """
+    threat_level = response.get("threat_level", "unknown").upper()
+    categories   = response.get("detection", {}).get("categories", [])
+    session_id   = response.get("session_id")
+    score        = response.get("threat_score", 0)
+    ip           = response.get("ip_address", "unknown")
+    prompt       = (response.get("original_prompt") or "")[:120]
+
+    severity = Severity.from_score(int(score))
+
+    return Alert(
+        title=f"Prompt Threat Detected — {threat_level}",
+        description=(
+            f"Gateway blocked a {threat_level} prompt from {ip}. "
+            f"Score: {score}/100. Preview: \"{prompt}{'...' if len(prompt) == 120 else ''}\""
+        ),
+        severity=severity,
+        component="gateway",
+        session_id=session_id,
+        techniques=categories,
+        metadata={
+            "threat_score": score,
+            "ip_address":   ip,
+            "request_id":   response.get("request_id"),
+            "action":       response.get("action"),
+        },
+    )

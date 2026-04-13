@@ -287,3 +287,35 @@ def print_live_summary(score_data: dict):
         print(f"\n  ⚠️  {summary['errors_skipped']} attacks skipped (endpoint errors)")
 
     print()
+
+def save_to_db(
+    score_data: dict,
+    results: list,
+    db_path: str,
+    run_id: str = None,
+    report_json_path: str = None,
+    report_txt_path: str = None,
+) -> str:
+    """
+    Persist a completed red team run to the shared threat_intel DB.
+    Writes one row to red_team_runs + one row per attack to red_team_findings.
+    Returns the run_id.
+
+    Add this call at the end of main.py after generate_json_report()
+    and generate_text_report():
+
+        from core.db_writer import save_run, save_findings
+        run_id = save_to_db(score_data, results, config.threat_intel_db_path,
+                            report_json_path=json_path, report_txt_path=txt_path)
+    """
+    from core.db_writer import save_run, save_findings
+
+    run_id = save_run(
+        db_path=db_path,
+        score_data=score_data,
+        run_id=run_id,
+        report_json_path=report_json_path,
+        report_txt_path=report_txt_path,
+    )
+    save_findings(db_path=db_path, results=results, run_id=run_id)
+    return run_id

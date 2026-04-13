@@ -6,8 +6,8 @@ SQLite-backed store for all ThreatEvents from ARIA and Gateway.
 Single source of truth for the unified dashboard.
 
 Tables:
-    threat_events   — every detection from every component
-    attacker_profiles — cross-vector correlation records
+    threat_events      — every detection from every component
+    attacker_profiles  — cross-vector correlation records
 
 Both components import and call write_event().
 The dashboard queries get_recent_events() and get_events_by_session().
@@ -93,6 +93,7 @@ def init_db(db_path: Optional[str] = None):
         c.execute("CREATE INDEX IF NOT EXISTS idx_events_source ON threat_events(source)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON threat_events(timestamp)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_events_caller ON threat_events(caller_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_events_ip ON threat_events(ip_address)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_events_malicious ON threat_events(is_malicious)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_profiles_caller ON attacker_profiles(caller_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_profiles_ip ON attacker_profiles(ip_address)")
@@ -217,6 +218,69 @@ def get_events_by_session(session_id: str) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def get_events_by_ip(ip_address: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Get all threat events from a specific IP address across all components.
+    Useful for the dashboard IP correlation panel and manual investigation.
+    """
+    conn = _connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT * FROM threat_events
+            WHERE ip_address = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (ip_address, limit),
+        )
+        return [_row_to_dict(row) for row in c.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_ip_threat_summary(ip_address: str) -> Dict[str, Any]:
+    """
+    Aggregate threat summary for a single IP — used by the dashboard
+    to surface repeat offenders across ARIA and Gateway.
+    """
+    conn = _connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT
+                COUNT(*)                        AS total_events,
+                COUNT(DISTINCT source)          AS source_count,
+                GROUP_CONCAT(DISTINCT source)   AS sources,
+                MAX(threat_score)               AS max_score,
+                SUM(is_malicious)               AS malicious_count,
+                MIN(timestamp)                  AS first_seen,
+                MAX(timestamp)                  AS last_seen
+            FROM threat_events
+            WHERE ip_address = ?
+            """,
+            (ip_address,),
+        )
+        row = c.fetchone()
+        if not row or row[0] == 0:
+            return {}
+        return {
+            "ip_address":      ip_address,
+            "total_events":    row[0],
+            "source_count":    row[1],
+            "sources":         row[2],
+            "max_score":       row[3],
+            "malicious_count": row[4],
+            "first_seen":      row[5],
+            "last_seen":       row[6],
+            "cross_vector":    row[1] > 1,
+        }
+    finally:
+        conn.close()
+
+
 def get_cross_vector_sessions() -> List[Dict[str, Any]]:
     """
     Find sessions that appear in both ARIA and Gateway events.
@@ -327,96 +391,127 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
 
 def _correlate(conn: sqlite3.Connection, event: ThreatEvent):
     """
-    Check if this event's session_id or caller_id has been seen before
-    from a DIFFERENT source. If so, update or create an attacker profile.
+    Check for cross-vector attacker activity using two signals:
+      1. session_id seen from a different source (original behavior)
+      2. ip_address seen from a different source (new — catches same host, different sessions)
+
+    Either signal creates or updates an attacker profile.
     """
     try:
         c = conn.cursor()
 
-        # Look for existing events from a different source with same session
-        c.execute("""
-            SELECT DISTINCT source FROM threat_events
-            WHERE session_id = ? AND source != ?
-        """, (event.session_id, event.source.value))
+        # ── Signal 1: same session_id, different source ────────────────────────
+        c.execute(
+            "SELECT DISTINCT source FROM threat_events WHERE session_id = ? AND source != ?",
+            (event.session_id, event.source.value),
+        )
+        cross_by_session = [r[0] for r in c.fetchall()]
 
-        cross_sources = [r[0] for r in c.fetchall()]
+        # ── Signal 2: same ip_address, different source ────────────────────────
+        cross_by_ip = []
+        if event.ip_address:
+            c.execute(
+                """
+                SELECT DISTINCT source FROM threat_events
+                WHERE ip_address = ? AND source != ? AND ip_address IS NOT NULL
+                """,
+                (event.ip_address, event.source.value),
+            )
+            cross_by_ip = [r[0] for r in c.fetchall()]
 
-        if not cross_sources:
-            return  # No cross-vector correlation yet
+        if not cross_by_session and not cross_by_ip:
+            return  # No cross-vector activity yet
 
-        # Cross-vector hit — update or create attacker profile
-        profile_id = f"profile_{event.session_id}"
+        # ── Build profile ID ───────────────────────────────────────────────────
+        # Prefer session-based; fall back to IP-based
+        profile_id = (
+            f"profile_{event.session_id}"
+            if cross_by_session
+            else f"profile_ip_{event.ip_address.replace('.', '_')}"
+        )
 
-        c.execute("SELECT * FROM attacker_profiles WHERE profile_id = ?", (profile_id,))
-        existing = c.fetchone()
-
-        # Gather all events for this session
-        c.execute("""
-            SELECT source, threat_score, techniques, mitre_tags
-            FROM threat_events WHERE session_id = ?
-        """, (event.session_id,))
+        # Gather all relevant events
+        if cross_by_session:
+            c.execute(
+                "SELECT source, threat_score, techniques, mitre_tags, ip_address "
+                "FROM threat_events WHERE session_id = ?",
+                (event.session_id,),
+            )
+        else:
+            c.execute(
+                "SELECT source, threat_score, techniques, mitre_tags, ip_address "
+                "FROM threat_events WHERE ip_address = ?",
+                (event.ip_address,),
+            )
         all_events = c.fetchall()
 
-        all_sources = list(set(r[0] for r in all_events))
-        max_score = max(r[1] for r in all_events)
-        all_techniques = list(set(
-            t for r in all_events
-            for t in json.loads(r[2] or "[]")
-        ))
-        all_mitre = list(set(
-            t for r in all_events
-            for t in json.loads(r[3] or "[]")
-        ))
+        all_sources    = list(set(r[0] for r in all_events))
+        max_score      = max(r[1] for r in all_events)
+        all_techniques = list(set(t for r in all_events for t in json.loads(r[2] or "[]")))
+        all_mitre      = list(set(t for r in all_events for t in json.loads(r[3] or "[]")))
 
         risk = "low"
-        if max_score >= 75:  risk = "critical"
+        if max_score >= 75:   risk = "critical"
         elif max_score >= 55: risk = "high"
         elif max_score >= 35: risk = "medium"
 
         now = datetime.utcnow().isoformat()
 
+        c.execute("SELECT * FROM attacker_profiles WHERE profile_id = ?", (profile_id,))
+        existing = c.fetchone()
+
         if existing:
-            c.execute("""
+            c.execute(
+                """
                 UPDATE attacker_profiles SET
                     last_seen = ?, sources_seen = ?, total_events = ?,
                     max_threat_score = ?, all_techniques = ?,
-                    all_mitre_tags = ?, risk_rating = ?
+                    all_mitre_tags = ?, risk_rating = ?,
+                    ip_address = COALESCE(ip_address, ?)
                 WHERE profile_id = ?
-            """, (
-                now,
-                json.dumps(all_sources),
-                len(all_events),
-                max_score,
-                json.dumps(all_techniques),
-                json.dumps(all_mitre),
-                risk,
-                profile_id,
-            ))
+                """,
+                (
+                    now,
+                    json.dumps(all_sources),
+                    len(all_events),
+                    max_score,
+                    json.dumps(all_techniques),
+                    json.dumps(all_mitre),
+                    risk,
+                    event.ip_address,
+                    profile_id,
+                ),
+            )
         else:
-            c.execute("""
+            c.execute(
+                """
                 INSERT INTO attacker_profiles (
                     profile_id, first_seen, last_seen, session_ids,
                     sources_seen, total_events, max_threat_score,
                     all_techniques, all_mitre_tags,
                     caller_id, ip_address, risk_rating
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                profile_id, now, now,
-                json.dumps([event.session_id]),
-                json.dumps(all_sources),
-                len(all_events),
-                max_score,
-                json.dumps(all_techniques),
-                json.dumps(all_mitre),
-                event.caller_id,
-                event.ip_address,
-                risk,
-            ))
+                """,
+                (
+                    profile_id, now, now,
+                    json.dumps([event.session_id]),
+                    json.dumps(all_sources),
+                    len(all_events),
+                    max_score,
+                    json.dumps(all_techniques),
+                    json.dumps(all_mitre),
+                    event.caller_id,
+                    event.ip_address,
+                    risk,
+                ),
+            )
 
         conn.commit()
+
+        signal = "session" if cross_by_session else "ip"
         logger.info(
             f"[!] Cross-vector profile {'updated' if existing else 'created'}: "
-            f"{profile_id} | sources={all_sources} | score={max_score}"
+            f"{profile_id} | signal={signal} | sources={all_sources} | score={max_score}"
         )
 
     except Exception as e:
